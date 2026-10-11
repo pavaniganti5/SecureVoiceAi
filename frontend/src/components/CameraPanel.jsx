@@ -13,6 +13,7 @@ function CameraPanel({ onAnalysisComplete }) {
   const [isLoadingDemo, setIsLoadingDemo] = useState(false)
   const [confidence, setConfidence] = useState(0.35)
   const [cooldown, setCooldown] = useState(10)
+  const [inferenceFps, setInferenceFps] = useState(2)
   const [roi, setRoi] = useState(initialRoi)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
@@ -101,7 +102,12 @@ function CameraPanel({ onAnalysisComplete }) {
     try {
       const analysis = await analyzeVideo(
         video,
-        { confidence, cooldown_seconds: cooldown, ...roi },
+        {
+          confidence,
+          cooldown_seconds: cooldown,
+          inference_fps: inferenceFps,
+          ...roi,
+        },
         analysisId,
         controller.signal,
       )
@@ -318,8 +324,13 @@ function CameraPanel({ onAnalysisComplete }) {
       </label>
 
       {isAnalyzing && (
-        <div className="analysis-progress" role="progressbar" aria-label="Video analysis in progress">
-          <span />
+        <div className="analysis-progress-container">
+          <div className="analysis-progress" role="progressbar" aria-label="Video analysis in progress">
+            <span />
+          </div>
+          <div className="analysis-status-hint">
+            <span>Analyzing video frames with AI & syncing alert audio…</span>
+          </div>
         </div>
       )}
 
@@ -353,6 +364,18 @@ function CameraPanel({ onAnalysisComplete }) {
               <option value="10">10 seconds</option>
               <option value="30">30 seconds</option>
               <option value="60">60 seconds</option>
+            </select>
+          </label>
+          <label>
+            Inference sampling
+            <select
+              onChange={(event) => setInferenceFps(Number(event.target.value))}
+              value={inferenceFps}
+            >
+              <option value="1">1 frame/second · fastest</option>
+              <option value="2">2 frames/second · balanced (recommended)</option>
+              <option value="5">5 frames/second · high detail (slower)</option>
+              <option value="10">10 frames/second · maximum detail (slowest)</option>
             </select>
           </label>
           <div className="roi-controls">
@@ -413,6 +436,11 @@ function CameraPanel({ onAnalysisComplete }) {
             <span><strong>{result.person_detections}</strong> person boxes</span>
             <span><strong>{result.region_entry_events.length}</strong> region entries</span>
             <span><strong>{result.duration_seconds}s</strong> clip analyzed</span>
+            {result.processing_time_seconds != null && (
+              <span>
+                <strong>{result.processing_time_seconds.toFixed(2)}s</strong> processing time
+              </span>
+            )}
           </div>
           {result.region_entry_events.length > 0 ? (
             <ul className="detection-events">

@@ -152,11 +152,14 @@ def create_alert(
     *,
     detection_status: str = "recorded",
     source: str = "api",
+    voice_generation_status: str = "not_requested",
 ) -> dict[str, Any]:
     if detection_status not in {"detected", "recorded", "legacy"}:
         raise ValueError("Unsupported alert detection status.")
     if source not in {"uploaded_video", "api", "unknown"}:
         raise ValueError("Unsupported alert source.")
+    if voice_generation_status not in {"not_requested", "pending", "generated", "failed"}:
+        raise ValueError("Unsupported voice-generation status.")
 
     event_id = uuid4().hex
     alert = {
@@ -167,7 +170,7 @@ def create_alert(
         "alert_message": alert_message,
         "detection_status": detection_status,
         "source": source,
-        "voice_generation_status": "not_requested",
+        "voice_generation_status": voice_generation_status,
         "playback_status": "not_played",
     }
     try:

@@ -72,6 +72,24 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning(
             "MongoDB is not configured; alert persistence and API health checks will be unavailable"
         )
+    # Pre-warm YOLO model and voice cache so the first analysis request is fast
+    try:
+        from app.detection import get_model
+        get_model()
+    except Exception as error:
+        logger.warning("Could not pre-warm YOLO model during startup: %s", error)
+
+    if murf_service.murf_is_configured():
+        try:
+            murf_service.generate_speech(
+                "Home security alert. A person has been detected in "
+                "the monitored area. "
+                "Please check the security dashboard."
+            )
+            logger.info("Murf voice cache pre-warmed for default security alert.")
+        except Exception as error:
+            logger.debug("Murf voice cache pre-warm skipped or failed: %s", error)
+
     try:
         yield
     finally:
@@ -198,6 +216,7 @@ def detect_people_in_video(
     roi_width: Annotated[float, Form(gt=0, le=1)] = 1,
     roi_height: Annotated[float, Form(gt=0, le=1)] = 1,
     cooldown_seconds: Annotated[int, Form(ge=0, le=3600)] = 10,
+    inference_fps: Annotated[int, Form(ge=1, le=10)] = 2,
 ) -> VideoDetectionResponse:
     original_name = video.filename or "uploaded-video"
     suffix = Path(original_name.replace("\\", "/")).suffix.lower()
@@ -224,6 +243,7 @@ def detect_people_in_video(
         roi_width=roi_width,
         roi_height=roi_height,
         cooldown_seconds=cooldown_seconds,
+        inference_fps=inference_fps,
     )
 
     temporary_path: Path | None = None
@@ -270,6 +290,20 @@ def detect_people_in_video(
 
         persisted_events: list[PersonEntryEvent] = []
         for event in analysis["region_entry_events"]:
+            audio_base64: str | None = None
+            audio_content_type: str | None = None
+            voice_status = "not_requested"
+            voice_error: str | None = None
+
+            try:
+                generated_speech = murf_service.generate_speech(event["alert_message"])
+                voice_status = "generated"
+                audio_base64 = generated_speech.audio_base64
+                audio_content_type = generated_speech.audio_content_type
+            except murf_service.MurfServiceError as error:
+                voice_status = "failed"
+                voice_error = str(error)
+
             stored = database.create_alert(
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 event_type="person_entered_roi",
@@ -277,35 +311,19 @@ def detect_people_in_video(
                 alert_message=event["alert_message"],
                 detection_status="detected",
                 source="uploaded_video",
+                voice_generation_status=voice_status,
             )
 
-            database.update_voice_generation(stored["event_id"], "pending")
-            try:
-                generated_speech = murf_service.generate_speech(event["alert_message"])
-            except murf_service.MurfServiceError as error:
-                database.update_voice_generation(stored["event_id"], "failed")
-                persisted_events.append(
-                    PersonEntryEvent(
-                        event_id=stored["event_id"],
-                        media_time_seconds=event["media_time_seconds"],
-                        confidence=event["confidence"],
-                        alert_message=event["alert_message"],
-                        voice_generation_status="failed",
-                        voice_error=str(error),
-                    )
-                )
-                continue
-
-            database.update_voice_generation(stored["event_id"], "generated")
             persisted_events.append(
                 PersonEntryEvent(
                     event_id=stored["event_id"],
                     media_time_seconds=event["media_time_seconds"],
                     confidence=event["confidence"],
                     alert_message=event["alert_message"],
-                    voice_generation_status="generated",
-                    audio_base64=generated_speech.audio_base64,
-                    audio_content_type=generated_speech.audio_content_type,
+                    voice_generation_status=voice_status,
+                    voice_error=voice_error,
+                    audio_base64=audio_base64,
+                    audio_content_type=audio_content_type,
                 )
             )
 
@@ -357,4 +375,3 @@ def get_sample_video() -> FileResponse:
         status_code=status.HTTP_404_NOT_FOUND,
         detail="Sample demo video file was not found on the server.",
     )
-

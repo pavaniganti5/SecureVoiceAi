@@ -61,6 +61,7 @@ class DetectionConfig(BaseModel):
     roi_width: float = Field(default=1, gt=0, le=1)
     roi_height: float = Field(default=1, gt=0, le=1)
     cooldown_seconds: int = Field(default=10, ge=0, le=3600)
+    inference_fps: int = Field(default=2, ge=1, le=10)
 
     @model_validator(mode="after")
     def region_must_fit_frame(self) -> "DetectionConfig":
@@ -105,3 +106,4 @@ class VideoDetectionResponse(BaseModel):
     roi: DetectionRegion
     annotated_frame_jpeg: str | None
     saved_video: bool = False
+    processing_time_seconds: float | None = None

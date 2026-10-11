@@ -2,6 +2,7 @@ import base64
 import binascii
 import logging
 import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,9 +13,19 @@ BACKEND_DIRECTORY = Path(__file__).resolve().parents[1]
 load_dotenv(BACKEND_DIRECTORY / ".env")
 
 MURF_GENERATE_URL = "https://api.murf.ai/v1/speech/generate"
+
 DEFAULT_VOICE_ID = "en-US-natalie"
 MAX_AUDIO_BYTES = 8 * 1024 * 1024
+MAX_CACHE_ENTRIES = 100
 logger = logging.getLogger(__name__)
+
+_speech_cache: dict[tuple[str, str], "GeneratedSpeech"] = {}
+_cache_lock = threading.Lock()
+
+
+def clear_speech_cache() -> None:
+    with _cache_lock:
+        _speech_cache.clear()
 
 
 class MurfServiceError(Exception):
@@ -48,6 +59,12 @@ def generate_speech(
         )
 
     voice_id = murf_voice_id()
+    cache_key = (voice_id, text.strip())
+    if transport is None:
+        with _cache_lock:
+            cached = _speech_cache.get(cache_key)
+            if cached is not None:
+                return cached
     payload = {
         "text": text,
         "voiceId": voice_id,
@@ -126,7 +143,13 @@ def generate_speech(
     if len(audio_bytes) > MAX_AUDIO_BYTES:
         raise MurfServiceError("The generated audio exceeded the 8 MB response limit.")
 
-    return GeneratedSpeech(
+    speech = GeneratedSpeech(
         audio_base64=encoded_audio,
         audio_content_type="audio/mpeg",
     )
+    if transport is None:
+        with _cache_lock:
+            if len(_speech_cache) >= MAX_CACHE_ENTRIES:
+                _speech_cache.pop(next(iter(_speech_cache)), None)
+            _speech_cache[cache_key] = speech
+    return speech

@@ -13,6 +13,12 @@ from test_alert_history import FakeCollection
 
 
 class MurfServiceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        murf_service.clear_speech_cache()
+
+    def tearDown(self) -> None:
+        murf_service.clear_speech_cache()
+
     def test_sends_official_generation_payload_and_decodes_audio(self) -> None:
         audio = b"test-mp3-audio"
         request_details: dict[str, object] = {}
@@ -72,6 +78,20 @@ class MurfServiceTests(unittest.TestCase):
                 "Test alert", api_key="test-api-key", transport=transport
             )
 
+    def test_reuses_cached_audio_for_identical_production_requests(self) -> None:
+        response = httpx.Response(
+            200,
+            json={"encodedAudio": base64.b64encode(b"cached-audio").decode("ascii")},
+        )
+        with patch.object(murf_service.httpx, "Client") as client_class:
+            client_class.return_value.__enter__.return_value.post.return_value = response
+
+            first = murf_service.generate_speech("Repeated alert", api_key="test-api-key")
+            second = murf_service.generate_speech("Repeated alert", api_key="test-api-key")
+
+        self.assertEqual(first, second)
+        client_class.return_value.__enter__.return_value.post.assert_called_once()
+
 
 class DetectionVoiceRouteTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -117,10 +137,11 @@ class DetectionVoiceRouteTests(unittest.TestCase):
             "annotated_frame_jpeg": None,
         }
 
-    def _post_video(self) -> httpx.Response:
+    def _post_video(self, data: dict[str, str] | None = None) -> httpx.Response:
         return self.client.post(
             "/api/detection/video",
             headers={"X-Analysis-ID": str(uuid4())},
+            data=data,
             files={"video": ("sample.mp4", b"not-needed-for-mocked-analysis", "video/mp4")},
         )
 
@@ -184,6 +205,15 @@ class DetectionVoiceRouteTests(unittest.TestCase):
         self.assertIsNone(event["audio_base64"])
         alert = self.client.get("/api/alerts").json()["items"][0]
         self.assertEqual(alert["voice_generation_status"], "failed")
+
+    def test_detection_route_passes_requested_inference_sampling_rate(self) -> None:
+        with patch.object(
+            main, "analyze_video", side_effect=self._fake_analysis
+        ) as analyze:
+            response = self._post_video({"inference_fps": "1"})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(analyze.call_args.args[1].inference_fps, 1)
 
     def test_voice_status_does_not_expose_api_key(self) -> None:
         response = self.client.get("/api/voice/status")

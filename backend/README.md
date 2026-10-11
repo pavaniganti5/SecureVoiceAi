@@ -68,7 +68,7 @@ The API keeps the existing alert routes and response fields. New alert IDs are U
 
 ## Detection and privacy
 
-`POST /api/detection/video` accepts MP4, MOV, AVI, MKV, and WebM uploads up to 100 MB and 120 seconds. YOLO inference runs on the backend. The detector samples up to five frames per second, uses the configured normalized monitored region and confidence threshold, and applies an entry-edge cooldown before producing an alert. Temporary upload files are removed after success, error, or cancellation. Only alert metadata is stored in MongoDB; footage and snapshots are not retained by the application.
+`POST /api/detection/video` accepts MP4, MOV, AVI, MKV, and WebM uploads up to 100 MB and 120 seconds. YOLO inference runs on the backend in batches of up to four frames. Inference sampling defaults to two frames per second and can be set from one to ten frames per second in Detection settings: lower rates are faster but can miss brief entries, while higher rates inspect more detail and take longer. The result reports backend analysis processing time separately from upload and voice-generation time. The detector uses the configured normalized monitored region and confidence threshold, and applies an entry-edge cooldown before producing an alert. Temporary upload files are removed after success, error, or cancellation. Only alert metadata is stored in MongoDB; footage and snapshots are not retained by the application.
 
 `GET /api/health` checks MongoDB availability and is suitable as a deployment health check. `GET /api/alerts` returns real saved events. `GET /api/voice/status` returns only Murf configuration status, voice ID, and model, never a key.
 
