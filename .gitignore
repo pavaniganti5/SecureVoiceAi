@@ -1,6 +1,7 @@
 .venv/
 backend/.venv/
-backend/data/
+backend/data/*
+!backend/data/demo-security-video.mp4
 backend/.env
 backend/yolo11n.pt
 **/.env

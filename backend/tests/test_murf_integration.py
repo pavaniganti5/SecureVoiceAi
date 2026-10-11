@@ -193,6 +193,12 @@ class DetectionVoiceRouteTests(unittest.TestCase):
             {"configured": False, "voice_id": "en-US-natalie", "model": "GEN2"},
         )
 
+    def test_get_sample_video_returns_video_file(self) -> None:
+        response = self.client.get("/api/detection/sample-video")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("video/", response.headers.get("content-type", ""))
+        self.assertGreater(len(response.content), 1000)
+
 
 if __name__ == "__main__":
     unittest.main()

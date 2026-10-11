@@ -20,7 +20,7 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app import database
 from app import murf_service
@@ -102,20 +102,20 @@ configured_frontend_origins = [
     for origin in os.environ.get("FRONTEND_ORIGIN", "").split(",")
     if origin.strip()
 ]
-allowed_origins = configured_frontend_origins or [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:4173",
-    "http://127.0.0.1:4173",
-]
+# If FRONTEND_ORIGIN is not provided or contains "*", allow all origins so Vercel deployments are not blocked.
+if not configured_frontend_origins or "*" in configured_frontend_origins:
+    allowed_origins = ["*"]
+else:
+    allowed_origins = configured_frontend_origins
 
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=False,
-    allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type", "X-Analysis-ID"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 
@@ -334,3 +334,27 @@ def cancel_video_analysis(analysis_id: UUID) -> dict[str, bool]:
             )
         cancel_event.set()
     return {"cancel_requested": True}
+
+
+@app.get("/api/detection/sample-video")
+def get_sample_video() -> FileResponse:
+    candidates = [
+        Path(__file__).resolve().parent.parent / "data" / "demo-security-video.mp4",
+        Path(__file__).resolve().parent.parent.parent / "demo" / "demo-security-video.mp4",
+        Path(__file__).resolve().parent.parent.parent / "frontend" / "public" / "demo-security-video.mp4",
+        Path(__file__).resolve().parent.parent / "data" / "opencv-vtest.avi",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            media_type = "video/mp4" if candidate.suffix.lower() == ".mp4" else "video/x-msvideo"
+            return FileResponse(
+                path=candidate,
+                media_type=media_type,
+                filename=candidate.name,
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Sample demo video file was not found on the server.",
+    )
+

@@ -41,6 +41,23 @@ function App() {
     loadAlerts()
   }, [loadAlerts])
 
+  const checkHealth = useCallback((signal) => {
+    fetchBackendHealth(signal)
+      .then((result) => {
+        setHealth({
+          state: 'connected',
+          detail: result.database === 'connected'
+            ? 'API and MongoDB connected'
+            : 'API connected',
+        })
+      })
+      .catch((error) => {
+        if (!signal?.aborted && error.name !== 'AbortError') {
+          setHealth({ state: 'error', detail: error.message })
+        }
+      })
+  }, [])
+
   useEffect(() => {
     const controller = new AbortController()
     fetchAlerts({ limit: 10, signal: controller.signal })
@@ -57,24 +74,9 @@ function App() {
       .finally(() => {
         if (!controller.signal.aborted) setAlertsLoading(false)
       })
-    fetchBackendHealth(controller.signal)
-      .then((result) => {
-        if (!controller.signal.aborted) {
-          setHealth({
-            state: 'connected',
-            detail: result.database === 'connected'
-              ? 'API and MongoDB connected'
-              : 'API connected',
-          })
-        }
-      })
-      .catch((error) => {
-        if (!controller.signal.aborted && error.name !== 'AbortError') {
-          setHealth({ state: 'error', detail: error.message })
-        }
-      })
+    checkHealth(controller.signal)
     return () => controller.abort()
-  }, [loadAlerts])
+  }, [loadAlerts, checkHealth])
 
   const navigateTo = (section) => {
     setActiveSection(section)
@@ -191,7 +193,13 @@ function App() {
               </div>
               <span className="icon-tile teal"><Icon name="volume" /></span>
             </div>
-            <VoiceSettings onStatusChange={setVoiceConfigured} />
+            <VoiceSettings
+              onStatusChange={setVoiceConfigured}
+              onBackendChange={() => {
+                refreshAlerts()
+                checkHealth()
+              }}
+            />
           </section>
 
           <footer className="page-footer">

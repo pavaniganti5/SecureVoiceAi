@@ -4,7 +4,7 @@ services:
     runtime: python
     rootDir: backend
     plan: standard
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt && python -c "from ultralytics import YOLO; YOLO('yolo11n.pt')"
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     envVars:
@@ -19,4 +19,5 @@ services:
       - key: MURF_VOICE_ID
         value: en-US-natalie
       - key: FRONTEND_ORIGIN
-        sync: false
+        value: "*"
+

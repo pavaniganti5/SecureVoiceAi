@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { analyzeVideo, cancelVideoAnalysis } from '../services/detection.js'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { analyzeVideo, cancelVideoAnalysis, loadDemoVideo } from '../services/detection.js'
 import { updatePlaybackStatus } from '../services/voice.js'
 import { Icon } from './Icons.jsx'
 
@@ -8,6 +8,9 @@ const initialRoi = { roi_x: 0, roi_y: 0, roi_width: 1, roi_height: 1 }
 
 function CameraPanel({ onAnalysisComplete }) {
   const [video, setVideo] = useState(null)
+  const [previewMode, setPreviewMode] = useState('annotated')
+  const [isDemoVideo, setIsDemoVideo] = useState(false)
+  const [isLoadingDemo, setIsLoadingDemo] = useState(false)
   const [confidence, setConfidence] = useState(0.35)
   const [cooldown, setCooldown] = useState(10)
   const [roi, setRoi] = useState(initialRoi)
@@ -21,9 +24,20 @@ function CameraPanel({ onAnalysisComplete }) {
   const analysisIdRef = useRef(null)
   const audioRef = useRef(null)
 
-  const selectFile = (file) => {
+  const videoPreviewUrl = useMemo(() => {
+    return video ? URL.createObjectURL(video) : null
+  }, [video])
+
+  useEffect(() => {
+    return () => {
+      if (videoPreviewUrl) URL.revokeObjectURL(videoPreviewUrl)
+    }
+  }, [videoPreviewUrl])
+
+  const selectFile = (file, isDemo = false) => {
     setResult(null)
     setError('')
+    setIsDemoVideo(isDemo)
 
     if (file && file.size > MAX_VIDEO_BYTES) {
       setVideo(null)
@@ -38,17 +52,32 @@ function CameraPanel({ onAnalysisComplete }) {
     }
 
     setVideo(file)
+    setPreviewMode('video')
   }
 
   const selectVideo = (event) => {
-    selectFile(event.target.files?.[0] ?? null)
+    selectFile(event.target.files?.[0] ?? null, false)
     event.target.value = ''
   }
 
   const handleDrop = (event) => {
     event.preventDefault()
     setIsDragging(false)
-    selectFile(event.dataTransfer.files?.[0] ?? null)
+    selectFile(event.dataTransfer.files?.[0] ?? null, false)
+  }
+
+  const handleLoadDemo = async () => {
+    setError('')
+    setResult(null)
+    setIsLoadingDemo(true)
+    try {
+      const demoFile = await loadDemoVideo()
+      selectFile(demoFile, true)
+    } catch (demoError) {
+      setError(demoError.message)
+    } finally {
+      setIsLoadingDemo(false)
+    }
   }
 
   const updateRoi = (key, value) => {
@@ -57,7 +86,7 @@ function CameraPanel({ onAnalysisComplete }) {
 
   const startAnalysis = async () => {
     if (!video) {
-      setError('Choose an MP4, MOV, AVI, MKV, or WebM clip first.')
+      setError('Select a video file or load the sample demo video first.')
       return
     }
 
@@ -77,6 +106,7 @@ function CameraPanel({ onAnalysisComplete }) {
         controller.signal,
       )
       setResult(analysis)
+      setPreviewMode('annotated')
       onAnalysisComplete?.()
     } catch (analysisError) {
       setError(
@@ -142,24 +172,117 @@ function CameraPanel({ onAnalysisComplete }) {
     }
   }
 
+  const scrollToSettings = () => {
+    document.getElementById('settings')?.scrollIntoView({ behavior: 'smooth' })
+  }
+
   return (
     <>
+      <div className="demo-banner">
+        <div className="demo-banner-content">
+          <div className="demo-banner-tag">
+            <span className="demo-chip-badge">SAMPLE VIDEO READY</span>
+            <strong>Pedestrian Walk-in Security Demo</strong>
+          </div>
+          <p className="demo-banner-desc">
+            A 10-second high-efficiency surveillance clip (H.264 MP4) with pedestrian entry is bundled directly in this project.
+          </p>
+        </div>
+        <div className="demo-banner-actions">
+          <button
+            className="button button-primary demo-btn"
+            disabled={isLoadingDemo || isAnalyzing}
+            onClick={handleLoadDemo}
+            type="button"
+          >
+            <Icon name="play" /> {isLoadingDemo ? 'Loading demo clip…' : 'Load Sample Video'}
+          </button>
+          <a
+            className="button button-ghost demo-download-link"
+            download="demo-security-video.mp4"
+            href="/demo-security-video.mp4"
+            title="Download demo video to local drive"
+          >
+            <Icon name="download" /> Download Clip
+          </a>
+        </div>
+      </div>
+
       <div className="camera-preview" aria-live="polite">
         {result?.annotated_frame_jpeg ? (
-          <img
-            className="analysis-preview"
-            src={`data:image/jpeg;base64,${result.annotated_frame_jpeg}`}
-            alt="Annotated frame showing detected people and the monitored region"
-          />
+          <div className="preview-wrapper">
+            <div className="preview-mode-switch">
+              <button
+                className={`mode-switch-btn ${previewMode === 'annotated' ? 'active' : ''}`}
+                onClick={() => setPreviewMode('annotated')}
+                type="button"
+              >
+                Annotated Frame ({result.person_detections} detections)
+              </button>
+              {videoPreviewUrl && (
+                <button
+                  className={`mode-switch-btn ${previewMode === 'video' ? 'active' : ''}`}
+                  onClick={() => setPreviewMode('video')}
+                  type="button"
+                >
+                  Source Video
+                </button>
+              )}
+            </div>
+            {previewMode === 'annotated' ? (
+              <img
+                className="analysis-preview"
+                src={`data:image/jpeg;base64,${result.annotated_frame_jpeg}`}
+                alt="Annotated frame showing detected people and the monitored region"
+              />
+            ) : (
+              <video
+                className="analysis-video-player"
+                controls
+                playsInline
+                preload="metadata"
+                src={videoPreviewUrl}
+              >
+                <track kind="captions" />
+              </video>
+            )}
+          </div>
+        ) : videoPreviewUrl ? (
+          <div className="preview-wrapper">
+            <div className="preview-badge-overlay">
+              <span>{isDemoVideo ? 'Sample Video Loaded' : 'Custom Video Ready'}</span>
+            </div>
+            <video
+              className="analysis-video-player"
+              controls
+              playsInline
+              preload="metadata"
+              src={videoPreviewUrl}
+            >
+              <track kind="captions" />
+            </video>
+          </div>
         ) : (
           <div className="preview-empty">
             <span className="preview-camera-icon"><Icon name="camera" /></span>
-            <strong>{isAnalyzing ? 'Analyzing video locally…' : 'No video analyzed'}</strong>
+            <strong>{isAnalyzing ? 'Analyzing video on backend…' : 'No video selected'}</strong>
             <p>
               {isAnalyzing
-                ? 'Person detection runs on this computer. Please keep this page open.'
-                : 'Choose a short sample clip to see person boxes and the monitored region.'}
+                ? 'YOLO person detection is running on your configured backend. Please keep this page open.'
+                : 'Click "Load Sample Video" above or choose a local clip to see person boxes and region entry alerts.'}
             </p>
+            {!isAnalyzing && (
+              <div className="empty-quick-action">
+                <button
+                  className="button button-secondary quick-demo-btn"
+                  disabled={isLoadingDemo}
+                  onClick={handleLoadDemo}
+                  type="button"
+                >
+                  <Icon name="play" /> Load Sample Video
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -181,10 +304,17 @@ function CameraPanel({ onAnalysisComplete }) {
         />
         <span className="upload-icon"><Icon name="upload" /></span>
         <span className="upload-copy">
-          <strong>{video ? video.name : 'Drop a video here or browse files'}</strong>
-          <small>{video ? `${(video.size / 1024 / 1024).toFixed(1)} MB selected` : 'MP4, MOV, AVI, MKV, or WebM · up to 100 MB · 2 minutes'}</small>
+          <strong>
+            {video ? video.name : 'Drop a video here or browse files'}
+            {isDemoVideo && <span className="demo-pill">Sample demo</span>}
+          </strong>
+          <small>
+            {video
+              ? `${(video.size / 1024 / 1024).toFixed(2)} MB selected · Ready to analyze`
+              : 'MP4, MOV, AVI, MKV, or WebM · up to 100 MB · 2 minutes'}
+          </small>
         </span>
-        <span className="upload-browse">Choose video</span>
+        <span className="upload-browse">Browse file</span>
       </label>
 
       {isAnalyzing && (
@@ -193,13 +323,11 @@ function CameraPanel({ onAnalysisComplete }) {
         </div>
       )}
 
-      {/*
-        The input is deliberately inside a label so it remains keyboard- and
-        screen-reader-accessible while the surrounding panel accepts file drops.
-      */}
       <div className="video-controls">
         <div className="video-file-note">
-          {video ? 'Video is analyzed temporarily; the uploaded file is not stored.' : 'Select a clip to run person detection through the configured backend.'}
+          {video
+            ? `Ready: ${video.name} (${(video.size / 1024 / 1024).toFixed(2)} MB). Uploaded frames are processed temporarily and not stored.`
+            : 'Select a clip or click Load Sample Video to run person detection through the backend API.'}
         </div>
       </div>
 
@@ -252,7 +380,33 @@ function CameraPanel({ onAnalysisComplete }) {
         </div>
       </details>
 
-      {error && <p className="detection-error" role="alert">{error}</p>}
+      {error && (
+        <div className="detection-error-card" role="alert">
+          <div className="error-card-header">
+            <strong>Analysis error</strong>
+            <span className="error-card-badge">Connection / Processing issue</span>
+          </div>
+          <p className="error-card-message">{error}</p>
+          <div className="error-card-actions">
+            <button
+              className="button button-primary retry-btn"
+              disabled={!video || isAnalyzing}
+              onClick={startAnalysis}
+              type="button"
+            >
+              <Icon name="refresh" /> Retry analysis
+            </button>
+            <button
+              className="button button-ghost settings-hint-btn"
+              onClick={scrollToSettings}
+              type="button"
+            >
+              <Icon name="settings" /> Check backend connection
+            </button>
+          </div>
+        </div>
+      )}
+
       {result && (
         <div className="analysis-result" role="status">
           <div className="analysis-metrics">
@@ -298,7 +452,10 @@ function CameraPanel({ onAnalysisComplete }) {
       )}
 
       <div className="camera-controls">
-        <span className="camera-source"><Icon name="camera" /> Local uploaded video · no webcam access</span>
+        <span className="camera-source">
+          <Icon name="camera" />
+          {video ? (isDemoVideo ? 'Sample demo video loaded' : 'Local video clip loaded') : 'No clip loaded'}
+        </span>
         <div className="button-group">
           <button
             className="button button-primary"
