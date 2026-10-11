@@ -3,11 +3,13 @@ import math
 import os
 import threading
 import time
+import gc
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import cv2
+import torch
 from ultralytics import YOLO
 
 from app.schemas import DetectionConfig
@@ -192,7 +194,7 @@ def analyze_video(
             if not frames_to_process:
                 return
 
-            with _model_lock:
+            with _model_lock, torch.inference_mode():
                 results = model.predict(
                     source=frames_to_process,
                     classes=[0],
@@ -336,3 +338,4 @@ def analyze_video(
         }
     finally:
         capture.release()
+        gc.collect()
